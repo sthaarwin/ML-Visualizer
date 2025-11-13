@@ -175,6 +175,37 @@ int main() {
             if(testVertices.size() > 64) testVertices.erase(testVertices.begin());
             updateTestPoints(testVertices);
         }
+        ImGui::SameLine();
+        static std::vector<Vertex> removedStack;
+        if(ImGui::Button("Remove Last")){
+            if(!testVertices.empty()){
+                // pop last and push to undo stack
+                removedStack.push_back(testVertices.back());
+                testVertices.pop_back();
+                updateTestPoints(testVertices);
+            }
+        }
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Remove the most recently added test point (can undo)");
+        ImGui::SameLine();
+        if(ImGui::Button("Clear All")){
+            if(!testVertices.empty()){
+                // move all to undo stack
+                for(auto &v : testVertices) removedStack.push_back(v);
+                testVertices.clear();
+                updateTestPoints(testVertices);
+            }
+        }
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Remove all test points (can undo)");
+        ImGui::SameLine();
+        if(ImGui::Button("Undo")){
+            if(!removedStack.empty()){
+                // pop last removed and restore
+                testVertices.push_back(removedStack.back());
+                removedStack.pop_back();
+                updateTestPoints(testVertices);
+            }
+        }
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Undo last removal (restores most recently removed point)");
         ImGui::End();
 
         // Persistent display of last prediction below the controls
