@@ -61,6 +61,8 @@ int main() {
     initRenderer(irisVertices, axisVertices);
     // initialize test point buffer (small fixed capacity)
     initTestPoints(64);
+    // initialize intersection marker buffer
+    initIntersections(8);
 
     // Dataset selector state
     const char* datasetFiles[] = { "iris.csv", "synthetic.csv", "synthetic_nonlinear.csv" };
@@ -134,13 +136,29 @@ int main() {
         // Test point UI
         ImGui::Begin("Test Point");
         static float test_x = 0.0f, test_y = 0.0f;
-        ImGui::SliderFloat("X (-1..1)", &test_x, -1.0f, 1.0f);
-        ImGui::SliderFloat("Y (-1..1)", &test_y, -1.0f, 1.0f);
+        ImGui::SliderFloat("Petal Length (-1..1)", &test_x, -1.0f, 1.0f);
+        ImGui::SliderFloat("Petal Width (-1..1)", &test_y, -1.0f, 1.0f);
+        static char last_pred_name[32] = "-";
+        static float last_probs[3] = {0.0f, 0.0f, 0.0f};
         if(ImGui::Button("Predict")){
             auto p = model.predict_probs(test_x, test_y);
-            ImGui::Text("Prob class0 (blue): %.3f", p[0]);
-            ImGui::Text("Prob class1 (green): %.3f", p[1]);
-            ImGui::Text("Prob class2 (red): %.3f", p[2]);
+            int pred = model.predict_label(test_x, test_y);
+            const char* name = (pred==0) ? "Setosa" : (pred==1) ? "Versicolor" : "Virginica";
+            // Map normalized slider values back to original petal scale used when loading the dataset
+            float petalLength_cm = ((test_x + 1.0f) * 0.5f) * (6.9f - 1.0f) + 1.0f;
+            float petalWidth_cm = ((test_y + 1.0f) * 0.5f) * (2.5f - 0.1f) + 0.1f;
+
+            // store last prediction for persistent display
+            strncpy(last_pred_name, name, sizeof(last_pred_name)-1);
+            last_pred_name[sizeof(last_pred_name)-1] = '\0';
+            last_probs[0] = p[0]; last_probs[1] = p[1]; last_probs[2] = p[2];
+
+            ImGui::Text("Predicted: %s", name);
+            ImGui::Text("Normalized (x,y): (%.3f, %.3f)", test_x, test_y);
+            ImGui::Text("Original scale: Petal Length = %.2f cm, Petal Width = %.2f cm", petalLength_cm, petalWidth_cm);
+            ImGui::Text("%s (blue): %.3f", "Setosa", p[0]);
+            ImGui::Text("%s (green): %.3f", "Versicolor", p[1]);
+            ImGui::Text("%s (red): %.3f", "Virginica", p[2]);
         }
         ImGui::SameLine();
         if(ImGui::Button("Add To Plot")){
@@ -157,6 +175,14 @@ int main() {
             if(testVertices.size() > 64) testVertices.erase(testVertices.begin());
             updateTestPoints(testVertices);
         }
+        ImGui::End();
+
+        // Persistent display of last prediction below the controls
+        ImGui::Begin("Last Prediction");
+        ImGui::Text("Predicted class: %s", last_pred_name);
+        ImGui::Text("%s (blue): %.3f", "Setosa", last_probs[0]);
+        ImGui::Text("%s (green): %.3f", "Versicolor", last_probs[1]);
+        ImGui::Text("%s (red): %.3f", "Virginica", last_probs[2]);
         ImGui::End();
 
         // Training step(s)
@@ -199,30 +225,85 @@ int main() {
         updateVertices(irisVertices);
 
         // Update decision boundary lines for each pair of classes (i,j)
-        std::vector<Vertex> lines; lines.reserve(6);
-        auto clamp = [](float v, float a, float b){ return v < a ? a : (v > b ? b : v); };
+        struct LineEq{ float A,B,C; float r,g,b; };
+        std::vector<LineEq> lineEqs;
+        lineEqs.reserve(3);
         for(int i=0;i<3;++i){
             for(int j=i+1;j<3;++j){
-                // Solve (Wi - Wj) dot [1, x, y] = 0 -> y = - (delta_b + delta_wx * x) / delta_wy
                 float db = model.W[i][0] - model.W[j][0];
                 float dwx = model.W[i][1] - model.W[j][1];
                 float dwy = model.W[i][2] - model.W[j][2];
-                float xA = -1.0f, xB = 1.0f;
-                float yA = 10.0f, yB = 10.0f;
-                if(fabs(dwy) > 1e-6f){
-                    yA = -(db + dwx * xA) / dwy;
-                    yB = -(db + dwx * xB) / dwy;
-                }
-                yA = clamp(yA, -3.0f, 3.0f);
-                yB = clamp(yB, -3.0f, 3.0f);
-                // coloring: use yellow for boundaries
-                Vertex va = {xA, yA, 1.0f, 1.0f, 0.0f};
-                Vertex vb = {xB, yB, 1.0f, 1.0f, 0.0f};
-                lines.push_back(va);
-                lines.push_back(vb);
+                // Line: A*x + B*y + C = 0  (A = dwx, B = dwy, C = db)
+                LineEq L; L.A = dwx; L.B = dwy; L.C = db;
+                // choose color per pair for clarity
+                if(i==0 && j==1){ L.r=0.0f; L.g=1.0f; L.b=1.0f; } // cyan (0 vs 1)
+                else if(i==0 && j==2){ L.r=1.0f; L.g=0.0f; L.b=1.0f; } // magenta (0 vs 2)
+                else { L.r=1.0f; L.g=1.0f; L.b=0.0f; } // yellow (1 vs 2)
+                lineEqs.push_back(L);
             }
         }
+
+        // Clip each infinite line to the view rectangle [-1,1] x [-1,1]
+        std::vector<Vertex> lines; lines.reserve(6);
+        auto within = [](float v, float a, float b){ return v >= a - 1e-6f && v <= b + 1e-6f; };
+        for(const auto &L : lineEqs){
+            std::vector<std::pair<float,float>> pts;
+            // intersect with x = -1 and x = +1 (if B != 0 compute y)
+            if(fabs(L.B) > 1e-8f){
+                for(float xEdge : {-1.0f, 1.0f}){
+                    float y = -(L.C + L.A * xEdge) / L.B;
+                    if(within(y, -1.0f, 1.0f)) pts.emplace_back(xEdge, y);
+                }
+            }
+            // intersect with y = -1 and y = +1 (if A != 0 compute x)
+            if(fabs(L.A) > 1e-8f){
+                for(float yEdge : {-1.0f, 1.0f}){
+                    float x = -(L.C + L.B * yEdge) / L.A;
+                    if(within(x, -1.0f, 1.0f)) pts.emplace_back(x, yEdge);
+                }
+            }
+            // Remove duplicates (within eps)
+            auto dedup = [&](std::vector<std::pair<float,float>>& v){
+                std::vector<std::pair<float,float>> out;
+                for(auto &p : v){
+                    bool found=false;
+                    for(auto &q : out) if(fabs(p.first-q.first)<1e-4f && fabs(p.second-q.second)<1e-4f) { found=true; break; }
+                    if(!found) out.push_back(p);
+                }
+                v.swap(out);
+            };
+            dedup(pts);
+            if(pts.size() >= 2){
+                // pick first two
+                auto a = pts[0]; auto b = pts[1];
+                lines.push_back({a.first, a.second, L.r, L.g, L.b});
+                lines.push_back({b.first, b.second, L.r, L.g, L.b});
+            } else {
+                // line not visible in viewport; push offscreen to avoid drawing
+                lines.push_back({10.0f,10.0f,L.r,L.g,L.b});
+                lines.push_back({10.0f,10.0f,L.r,L.g,L.b});
+            }
+        }
+
+        // Compute analytic intersections between the three pairwise lines and display markers inside view
+        std::vector<Vertex> inters; inters.reserve(3);
+        for(size_t a=0;a<lineEqs.size();++a){
+            for(size_t b=a+1;b<lineEqs.size();++b){
+                const auto &L1 = lineEqs[a];
+                const auto &L2 = lineEqs[b];
+                float det = L1.A * L2.B - L2.A * L1.B;
+                if(fabs(det) < 1e-8f) continue; // parallel
+                float ix = (L1.B * L2.C - L2.B * L1.C) / det;
+                float iy = (L2.A * L1.C - L1.A * L2.C) / det;
+                if(within(ix, -1.0f, 1.0f) && within(iy, -1.0f, 1.0f)){
+                    // white marker
+                    inters.push_back({ix, iy, 1.0f, 1.0f, 1.0f});
+                }
+            }
+        }
+
         updateBoundaryLines(lines);
+        updateIntersections(inters);
 
         // Render UI to get draw data
         ImGui::Render();
@@ -231,7 +312,8 @@ int main() {
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        // Smoky bluish-gray base background
+        glClearColor(0.06f, 0.07f, 0.09f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         // GPU drawing
@@ -243,24 +325,26 @@ int main() {
         drawLines(axisVertices.size());
         // Draw decision boundaries
         drawBoundary();
+        // Draw analytic intersection markers (if any)
+        drawIntersections();
         // Draw loss plot (top-right small panel)
         // Build loss plot vertices in NDC space (right side)
-        int maxPts = 512;
-        int n = (int)lossHistory.size();
-        float x0 = 0.6f, x1 = 0.98f;
-        float y0 = -0.95f, y1 = -0.6f;
-        float maxLoss = 0.0f; for(float v: lossHistory) if(v>maxLoss) maxLoss = v;
-        maxLoss = std::max(maxLoss, 1e-3f);
-        std::vector<Vertex> lossVerts; lossVerts.reserve(n);
-        for(int i=0;i<n;++i){
-            float t = n==1?0.0f: (float)i / (float)(n-1);
-            float x = x0 + t * (x1 - x0);
-            float y = y0 + (lossHistory[i] / maxLoss) * (y1 - y0);
-            // color white
-            lossVerts.push_back({x, y, 1.0f, 1.0f, 1.0f});
-        }
-        updateLossPlot(lossVerts);
-        drawLossPlot();
+        // int maxPts = 512;
+        // int n = (int)lossHistory.size();
+        // float x0 = 0.6f, x1 = 0.98f;
+        // float y0 = -0.95f, y1 = -0.6f;
+        // float maxLoss = 0.0f; for(float v: lossHistory) if(v>maxLoss) maxLoss = v;
+        // maxLoss = std::max(maxLoss, 1e-3f);
+        // std::vector<Vertex> lossVerts; lossVerts.reserve(n);
+        // for(int i=0;i<n;++i){
+        //     float t = n==1?0.0f: (float)i / (float)(n-1);
+        //     float x = x0 + t * (x1 - x0);
+        //     float y = y0 + (lossHistory[i] / maxLoss) * (y1 - y0);
+        //     // color white
+        //     lossVerts.push_back({x, y, 1.0f, 1.0f, 1.0f});
+        // }
+        // updateLossPlot(lossVerts);
+        // drawLossPlot();
 
         // Render ImGui on top
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

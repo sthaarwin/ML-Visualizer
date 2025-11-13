@@ -26,6 +26,10 @@ void drawTestPoints();
 // Decision boundary support (up to three pairwise lines -> 6 vertices total)
 void updateBoundaryLines(const std::vector<Vertex>& lineVertices); // expect 6 vertices (3 lines)
 void drawBoundary();
+// Intersection markers (small points where pairwise boundaries cross)
+void initIntersections(int maxPoints);
+void updateIntersections(const std::vector<Vertex>& pts);
+void drawIntersections();
 // Background/confidence grid
 void initBackgroundGrid(int cols, int rows);
 void updateBackgroundGrid(const std::vector<Vertex>& gridVertices);

@@ -14,9 +14,11 @@ unsigned int VAO_boundary = 0, VBO_boundary = 0;
 unsigned int VAO_bg = 0, VBO_bg = 0;
 unsigned int VAO_loss = 0, VBO_loss = 0;
 unsigned int VAO_test = 0, VBO_test = 0;
+unsigned int VAO_inter = 0, VBO_inter = 0;
 int bg_cols = 0, bg_rows = 0;
 int loss_point_count = 0;
 int test_point_count = 0;
+int inter_point_count = 0;
 
 //global variable
 int windowWidth = 800;
@@ -55,7 +57,13 @@ static GLuint createSimpleProgram(){
     const char* fs = "#version 330 core\n"
                      "in vec3 vColor;\n"
                      "out vec4 FragColor;\n"
-                     "void main(){ FragColor = vec4(vColor, 1.0); }\n";
+                     "uniform vec3 u_smoke_color;\n"
+                     "uniform float u_smoke_mix; // 0.0 = no smoke, 1.0 = full smoke color\n"
+                     "uniform float u_alpha;\n"
+                     "void main(){\n"
+                     "    vec3 col = mix(vColor, u_smoke_color, u_smoke_mix);\n"
+                     "    FragColor = vec4(col, u_alpha);\n"
+                     "}\n";
     GLuint v = compileShader(GL_VERTEX_SHADER, vs);
     GLuint f = compileShader(GL_FRAGMENT_SHADER, fs);
     GLuint p = glCreateProgram();
@@ -118,10 +126,14 @@ void initRenderer(const std::vector<Vertex>& pointVertices, const std::vector<Ve
     VAO_loss = 0; VBO_loss = 0;
     // Test points VAO/VBO (small fixed buffer)
     VAO_test = 0; VBO_test = 0;
+    VAO_inter = 0; VBO_inter = 0;
 
     // Unbind
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+    // Enable alpha blending for smoky overlay effects
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     // Debug info
     printf("initRenderer: shaderProgram=%u, pointsVAO=%u, axesVAO=%u\n", shaderProgram, VAO_points, VAO_axes);
 }
@@ -154,7 +166,17 @@ void drawBackgroundGrid(){
     if(!shaderProgram || !VAO_bg) return;
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_bg);
-    glPointSize(2.0f);
+    // Subtle, slightly transparent points blended with a smoky base
+    GLint loc_smoke = glGetUniformLocation(shaderProgram, "u_smoke_color");
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    // smoky color: bluish-gray
+    glUniform3f(loc_smoke, 0.08f, 0.09f, 0.12f);
+    // mix a fair amount of smoke so colored regions look misted
+    glUniform1f(loc_mix, 0.45f);
+    // low alpha to keep it subtle
+    glUniform1f(loc_alpha, 0.85f);
+    glPointSize(3.0f);
     glDrawArrays(GL_POINTS, 0, bg_cols * bg_rows);
     glBindVertexArray(0);
     glUseProgram(0);
@@ -187,6 +209,11 @@ void drawLossPlot(){
     if(!shaderProgram || !VAO_loss) return;
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_loss);
+    // ensure full opacity for plot lines
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    glUniform1f(loc_mix, 0.0f);
+    glUniform1f(loc_alpha, 1.0f);
     glLineWidth(2.0f);
     if(loss_point_count > 0) glDrawArrays(GL_LINE_STRIP, 0, loss_point_count);
     glBindVertexArray(0);
@@ -197,6 +224,11 @@ void drawPoints(size_t numPoints){
     if(!shaderProgram) return;
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_points);
+    // Draw dataset points fully opaque (no smoke mix)
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    glUniform1f(loc_mix, 0.0f);
+    glUniform1f(loc_alpha, 1.0f);
     glPointSize(6.0f);
     glDrawArrays(GL_POINTS, 0, (GLsizei)numPoints);
     GLenum err = glGetError();
@@ -209,6 +241,11 @@ void drawLines(size_t numVertices){
     if(!shaderProgram) return;
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_axes);
+    // Axes are opaque
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    glUniform1f(loc_mix, 0.0f);
+    glUniform1f(loc_alpha, 1.0f);
     glDrawArrays(GL_LINES, 0, (GLsizei)numVertices);
     GLenum err = glGetError();
     if(err != GL_NO_ERROR) printf("glDrawArrays(GL_LINES) error: 0x%04x\n", err);
@@ -327,6 +364,11 @@ void drawBoundary(){
     if(!shaderProgram) return;
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_boundary);
+    // Decision boundary lines should remain visible
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    glUniform1f(loc_mix, 0.0f);
+    glUniform1f(loc_alpha, 1.0f);
     glDrawArrays(GL_LINES, 0, 6);
     glBindVertexArray(0);
     glUseProgram(0);
@@ -359,8 +401,52 @@ void drawTestPoints(){
     if(!shaderProgram || !VAO_test) return;
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_test);
+    // Test points should be prominent
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    glUniform1f(loc_mix, 0.0f);
+    glUniform1f(loc_alpha, 1.0f);
     glPointSize(10.0f);
     if(test_point_count > 0) glDrawArrays(GL_POINTS, 0, test_point_count);
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
+void initIntersections(int maxPoints){
+    if(VAO_inter){ glDeleteVertexArrays(1, &VAO_inter); glDeleteBuffers(1, &VBO_inter); }
+    glGenVertexArrays(1, &VAO_inter);
+    glGenBuffers(1, &VBO_inter);
+    glBindVertexArray(VAO_inter);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_inter);
+    glBufferData(GL_ARRAY_BUFFER, maxPoints * sizeof(Vertex), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    inter_point_count = 0;
+}
+
+void updateIntersections(const std::vector<Vertex>& pts){
+    if(!VAO_inter || !VBO_inter) return;
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_inter);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, pts.size()*sizeof(Vertex), pts.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    inter_point_count = (int)pts.size();
+}
+
+void drawIntersections(){
+    if(!shaderProgram || !VAO_inter) return;
+    glUseProgram(shaderProgram);
+    glBindVertexArray(VAO_inter);
+    glPointSize(6.0f);
+    // ensure full opacity
+    GLint loc_mix = glGetUniformLocation(shaderProgram, "u_smoke_mix");
+    GLint loc_alpha = glGetUniformLocation(shaderProgram, "u_alpha");
+    glUniform1f(loc_mix, 0.0f);
+    glUniform1f(loc_alpha, 1.0f);
+    if(inter_point_count > 0) glDrawArrays(GL_POINTS, 0, inter_point_count);
     glBindVertexArray(0);
     glUseProgram(0);
 }
