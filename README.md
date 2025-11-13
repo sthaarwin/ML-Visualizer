@@ -53,7 +53,7 @@ The app opens an interactive window where you can:
 - Toggle model parameters and training options in the ImGui panel
 - Watch model predictions and metrics update in real time
 
-![Demo screenshot](demp.png)
+![Demo screenshot](demo.png)
 
 ## Datasets
 
