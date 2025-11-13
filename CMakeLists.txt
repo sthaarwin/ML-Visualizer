@@ -9,6 +9,7 @@ set(PROJECT_SOURCES
     ${PROJECT_SOURCE_DIR}/src/main.cpp
     ${PROJECT_SOURCE_DIR}/src/renderer.cpp       
     ${PROJECT_SOURCE_DIR}/src/dataset.cpp         
+    ${PROJECT_SOURCE_DIR}/src/model.cpp
 )
 
 # Add ImGui implementation/source files from the included imgui folder

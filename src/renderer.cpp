@@ -10,6 +10,11 @@
 unsigned int VAO_points = 0, VBO_points = 0;
 unsigned int VAO_axes = 0, VBO_axes = 0;
 unsigned int shaderProgram = 0;
+unsigned int VAO_boundary = 0, VBO_boundary = 0;
+unsigned int VAO_bg = 0, VBO_bg = 0;
+unsigned int VAO_loss = 0, VBO_loss = 0;
+int bg_cols = 0, bg_rows = 0;
+int loss_point_count = 0;
 
 //global variable
 int windowWidth = 800;
@@ -89,11 +94,99 @@ void initRenderer(const std::vector<Vertex>& pointVertices, const std::vector<Ve
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
     glEnableVertexAttribArray(1);
 
+    // Boundary VAO/VBO (up to three pairwise lines -> 6 vertices)
+    glGenVertexArrays(1, &VAO_boundary);
+    glGenBuffers(1, &VBO_boundary);
+    glBindVertexArray(VAO_boundary);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_boundary);
+    Vertex boundaryInit[6] = {
+        {-1.0f, 0.0f, 1,1,0}, {1.0f, 0.0f, 1,1,0},
+        {-1.0f, 0.0f, 1,1,0}, {1.0f, 0.0f, 1,1,0},
+        {-1.0f, 0.0f, 1,1,0}, {1.0f, 0.0f, 1,1,0}
+    };
+    glBufferData(GL_ARRAY_BUFFER, sizeof(boundaryInit), boundaryInit, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    // Background VAO/VBO (initialized on demand)
+    VAO_bg = 0; VBO_bg = 0;
+    // Loss plot VAO/VBO (initialized on demand)
+    VAO_loss = 0; VBO_loss = 0;
+
     // Unbind
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
     // Debug info
     printf("initRenderer: shaderProgram=%u, pointsVAO=%u, axesVAO=%u\n", shaderProgram, VAO_points, VAO_axes);
+}
+
+void initBackgroundGrid(int cols, int rows){
+    bg_cols = cols; bg_rows = rows;
+    if(VAO_bg) { glDeleteVertexArrays(1, &VAO_bg); glDeleteBuffers(1, &VBO_bg); }
+    glGenVertexArrays(1, &VAO_bg);
+    glGenBuffers(1, &VBO_bg);
+    glBindVertexArray(VAO_bg);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_bg);
+    // allocate but empty for now
+    glBufferData(GL_ARRAY_BUFFER, cols * rows * sizeof(Vertex), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+void updateBackgroundGrid(const std::vector<Vertex>& gridVertices){
+    if(!VAO_bg || !VBO_bg) return;
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_bg);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, gridVertices.size()*sizeof(Vertex), gridVertices.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void drawBackgroundGrid(){
+    if(!shaderProgram || !VAO_bg) return;
+    glUseProgram(shaderProgram);
+    glBindVertexArray(VAO_bg);
+    glPointSize(2.0f);
+    glDrawArrays(GL_POINTS, 0, bg_cols * bg_rows);
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
+void initLossPlot(int maxPoints){
+    if(VAO_loss) { glDeleteVertexArrays(1, &VAO_loss); glDeleteBuffers(1, &VBO_loss); }
+    glGenVertexArrays(1, &VAO_loss);
+    glGenBuffers(1, &VBO_loss);
+    glBindVertexArray(VAO_loss);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_loss);
+    glBufferData(GL_ARRAY_BUFFER, maxPoints * sizeof(Vertex), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+void updateLossPlot(const std::vector<Vertex>& plotVertices){
+    if(!VAO_loss || !VBO_loss) return;
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_loss);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, plotVertices.size()*sizeof(Vertex), plotVertices.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    loss_point_count = (int)plotVertices.size();
+}
+
+void drawLossPlot(){
+    if(!shaderProgram || !VAO_loss) return;
+    glUseProgram(shaderProgram);
+    glBindVertexArray(VAO_loss);
+    glLineWidth(2.0f);
+    if(loss_point_count > 0) glDrawArrays(GL_LINE_STRIP, 0, loss_point_count);
+    glBindVertexArray(0);
+    glUseProgram(0);
 }
 
 void drawPoints(size_t numPoints){
@@ -198,4 +291,26 @@ void drawLineManual(int x0, int y0, int x1, int y1, int r, int g, int b){
         if(e2 >= dy){ err += dy; x0 += sx; }
         if(e2 <= dx){ err += dx; y0 += sy; }
     }
+}
+
+void updateBoundaryLines(const std::vector<Vertex>& lineVertices){
+    // Expect up to 6 vertices (3 lines). If fewer provided, pad with off-screen values.
+    Vertex tmp[6];
+    size_t n = lineVertices.size();
+    for(size_t i=0;i<6;++i){
+        if(i < n) tmp[i] = lineVertices[i];
+        else tmp[i] = {10.0f, 10.0f, 1,1,0};
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_boundary);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tmp), tmp);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void drawBoundary(){
+    if(!shaderProgram) return;
+    glUseProgram(shaderProgram);
+    glBindVertexArray(VAO_boundary);
+    glDrawArrays(GL_LINES, 0, 6);
+    glBindVertexArray(0);
+    glUseProgram(0);
 }

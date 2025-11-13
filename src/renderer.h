@@ -18,6 +18,19 @@ void drawPoints(size_t numPoints);
 void drawLines(size_t numVertices);
 void updateVertices(const std::vector<Vertex>& vertices);
 
+// Decision boundary support (up to three pairwise lines -> 6 vertices total)
+void updateBoundaryLines(const std::vector<Vertex>& lineVertices); // expect 6 vertices (3 lines)
+void drawBoundary();
+// Background/confidence grid
+void initBackgroundGrid(int cols, int rows);
+void updateBackgroundGrid(const std::vector<Vertex>& gridVertices);
+void drawBackgroundGrid();
+
+// Loss plot
+void initLossPlot(int maxPoints);
+void updateLossPlot(const std::vector<Vertex>& plotVertices);
+void drawLossPlot();
+
 //Manual Drawing
 void drawCircleManual(int xc, int yc, int radius, float r, float g, float b);
 void drawLineManual(int x0, int y0, int x1, int y1, int r, int g, int b);
