@@ -11,6 +11,8 @@ struct LogisticModel {
 
     LogisticModel(float learning_rate = 0.5f);
     void randomize();
+    bool save(const char* filename) const;
+    bool load(const char* filename);
     // return vector of class probabilities (size 3)
     std::vector<float> predict_probs(float x, float y) const;
     int predict_label(float x, float y) const;

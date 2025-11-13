@@ -16,13 +16,13 @@
 std::vector<point2D> irisData;
 std::vector<Vertex> irisVertices;
 std::vector<Vertex> axisVertices;
-
+std::vector<Vertex> testVertices;
 
 
 int main() {
 
     std::cout << "Loading dataset..." << std::endl;
-    irisData = LoadIrisDataset("../dataset/iris.csv");
+    irisData = LoadIrisDataset("../dataset/synthetic.csv");
     std::cout << "Loaded " << irisData.size() << " data points" << std::endl;
     
     irisVertices = irisToVertex(irisData);
@@ -59,6 +59,13 @@ int main() {
 
     // Now initialize our GL resources (VAO/VBO etc.)
     initRenderer(irisVertices, axisVertices);
+    // initialize test point buffer (small fixed capacity)
+    initTestPoints(64);
+
+    // Dataset selector state
+    const char* datasetFiles[] = { "iris.csv", "synthetic.csv", "synthetic_nonlinear.csv" };
+    static int datasetIndex = 1; // default to synthetic
+    static bool randomizeOnLoad = true;
 
     // Initialize background grid and loss plot
     const int GRID_COLS = 80;
@@ -87,12 +94,80 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Train one epoch per frame and update visualization
-        model.train_epoch(irisData);
+        // Build UI (controls)
+        static bool paused = false;
+        static int epochsPerFrame = 1;
+        static float lr_ui = model.lr;
 
-        // Append loss to history
-        lossHistory.push_back(model.last_loss);
-        if(lossHistory.size() > 512) lossHistory.erase(lossHistory.begin());
+        ImGui::Begin("Controls");
+        // Dataset selector
+        if(ImGui::Combo("Dataset", &datasetIndex, datasetFiles, IM_ARRAYSIZE(datasetFiles))){
+            // user changed selection; reload immediately
+            std::string path = std::string("../dataset/") + datasetFiles[datasetIndex];
+            auto newData = LoadIrisDataset(path.c_str());
+            if(!newData.empty()){
+                irisData = newData;
+                irisVertices = irisToVertex(irisData);
+                setPointVertices(irisVertices); // reallocate VBO for new size
+                if(randomizeOnLoad) model.randomize();
+                lossHistory.clear();
+            }
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Randomize on Load", &randomizeOnLoad);
+        ImGui::Text("Epoch: %d", model.epochs_trained);
+        ImGui::Text("Loss: %.4f", model.last_loss);
+        if(ImGui::SliderFloat("Learning Rate", &lr_ui, 0.0001f, 2.0f, "%.4f")){
+            model.lr = lr_ui;
+        }
+        ImGui::SliderInt("Epochs / Frame", &epochsPerFrame, 0, 10);
+        if(ImGui::Button(paused ? "Resume" : "Pause")) paused = !paused;
+        ImGui::SameLine();
+        if(ImGui::Button("Randomize Model")) model.randomize();
+        if(ImGui::Button("Save Model")) model.save("model.bin");
+        ImGui::SameLine();
+        if(ImGui::Button("Load Model")){
+            if(model.load("model.bin")) lr_ui = model.lr;
+        }
+        ImGui::End();
+
+        // Test point UI
+        ImGui::Begin("Test Point");
+        static float test_x = 0.0f, test_y = 0.0f;
+        ImGui::SliderFloat("X (-1..1)", &test_x, -1.0f, 1.0f);
+        ImGui::SliderFloat("Y (-1..1)", &test_y, -1.0f, 1.0f);
+        if(ImGui::Button("Predict")){
+            auto p = model.predict_probs(test_x, test_y);
+            ImGui::Text("Prob class0 (blue): %.3f", p[0]);
+            ImGui::Text("Prob class1 (green): %.3f", p[1]);
+            ImGui::Text("Prob class2 (red): %.3f", p[2]);
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Add To Plot")){
+            // add a test vertex colored by predicted label
+            auto p = model.predict_probs(test_x, test_y);
+            int pred = model.predict_label(test_x, test_y);
+            Vertex v;
+            v.x = test_x; v.y = test_y;
+            if(pred == 0){ v.r = 0.0f; v.g = 0.0f; v.b = 1.0f; }
+            else if(pred == 1){ v.r = 0.0f; v.g = 1.0f; v.b = 0.0f; }
+            else { v.r = 1.0f; v.g = 0.0f; v.b = 0.0f; }
+            testVertices.push_back(v);
+            // limit
+            if(testVertices.size() > 64) testVertices.erase(testVertices.begin());
+            updateTestPoints(testVertices);
+        }
+        ImGui::End();
+
+        // Training step(s)
+        if(!paused && epochsPerFrame > 0){
+            for(int e=0;e<epochsPerFrame;++e){
+                model.train_epoch(irisData);
+                // Append loss to history per epoch
+                lossHistory.push_back(model.last_loss);
+                if(lossHistory.size() > 512) lossHistory.erase(lossHistory.begin());
+            }
+        }
 
         // Update background confidence grid: compute probs for a regular grid
         std::vector<Vertex> bg; bg.reserve(GRID_COLS * GRID_ROWS);
@@ -102,10 +177,9 @@ int main() {
                 float ny = (float)r / (GRID_ROWS-1) * 2.0f - 1.0f; // -1..1
                 auto probs = model.predict_probs(nx, ny);
                 // color blend by probability weighted sum of class colors
-                float cr = probs[0]*0.0f + probs[1]*0.0f + probs[2]*1.0f; // blue, green, red ordering -> adjust
-                float cg = probs[0]*0.0f + probs[1]*1.0f + probs[2]*0.0f;
-                float cb = probs[0]*1.0f + probs[1]*0.0f + probs[2]*0.0f;
-                // swap mapping to match class colors used for points: class0 blue, class1 green, class2 red
+                float cr = probs[0]*0.0f + probs[1]*0.0f + probs[2]*1.0f; // class2 red
+                float cg = probs[0]*0.0f + probs[1]*1.0f + probs[2]*0.0f; // class1 green
+                float cb = probs[0]*1.0f + probs[1]*0.0f + probs[2]*0.0f; // class0 blue
                 Vertex v = { nx, ny, cr, cg, cb };
                 bg.push_back(v);
             }
@@ -123,6 +197,7 @@ int main() {
             irisVertices[i] = v;
         }
         updateVertices(irisVertices);
+
         // Update decision boundary lines for each pair of classes (i,j)
         std::vector<Vertex> lines; lines.reserve(6);
         auto clamp = [](float v, float a, float b){ return v < a ? a : (v > b ? b : v); };
@@ -149,12 +224,6 @@ int main() {
         }
         updateBoundaryLines(lines);
 
-        // Build UI
-        ImGui::Begin("Controls");
-        ImGui::Text("Epoch: %d", model.epochs_trained);
-        ImGui::Text("Loss: %.4f", model.last_loss);
-        ImGui::End();
-
         // Render UI to get draw data
         ImGui::Render();
 
@@ -169,6 +238,8 @@ int main() {
         // Draw background confidence first (subtle)
         drawBackgroundGrid();
         drawPoints(irisVertices.size());
+        // draw any user test points on top of dataset points
+        drawTestPoints();
         drawLines(axisVertices.size());
         // Draw decision boundaries
         drawBoundary();

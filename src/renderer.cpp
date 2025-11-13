@@ -13,8 +13,10 @@ unsigned int shaderProgram = 0;
 unsigned int VAO_boundary = 0, VBO_boundary = 0;
 unsigned int VAO_bg = 0, VBO_bg = 0;
 unsigned int VAO_loss = 0, VBO_loss = 0;
+unsigned int VAO_test = 0, VBO_test = 0;
 int bg_cols = 0, bg_rows = 0;
 int loss_point_count = 0;
+int test_point_count = 0;
 
 //global variable
 int windowWidth = 800;
@@ -114,6 +116,8 @@ void initRenderer(const std::vector<Vertex>& pointVertices, const std::vector<Ve
     VAO_bg = 0; VBO_bg = 0;
     // Loss plot VAO/VBO (initialized on demand)
     VAO_loss = 0; VBO_loss = 0;
+    // Test points VAO/VBO (small fixed buffer)
+    VAO_test = 0; VBO_test = 0;
 
     // Unbind
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -217,6 +221,19 @@ void updateVertices(const std::vector<Vertex>& vertices){
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size()*sizeof(Vertex), vertices.data());
 }
 
+void setPointVertices(const std::vector<Vertex>& vertices){
+    glBindVertexArray(VAO_points);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_points);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
+    // re-specify attributes in case driver state changed
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
 // Convert Iris dataset to Vertex array
 std::vector<Vertex> irisToVertex(const std::vector<point2D>& data){
     std::vector<Vertex> vertices;
@@ -311,6 +328,39 @@ void drawBoundary(){
     glUseProgram(shaderProgram);
     glBindVertexArray(VAO_boundary);
     glDrawArrays(GL_LINES, 0, 6);
+    glBindVertexArray(0);
+    glUseProgram(0);
+}
+
+void initTestPoints(int maxPoints){
+    if(VAO_test) { glDeleteVertexArrays(1, &VAO_test); glDeleteBuffers(1, &VBO_test); }
+    glGenVertexArrays(1, &VAO_test);
+    glGenBuffers(1, &VBO_test);
+    glBindVertexArray(VAO_test);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_test);
+    glBufferData(GL_ARRAY_BUFFER, maxPoints * sizeof(Vertex), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)(2*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+void updateTestPoints(const std::vector<Vertex>& testVertices){
+    if(!VAO_test || !VBO_test) return;
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_test);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, testVertices.size()*sizeof(Vertex), testVertices.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    test_point_count = (int)testVertices.size();
+}
+
+void drawTestPoints(){
+    if(!shaderProgram || !VAO_test) return;
+    glUseProgram(shaderProgram);
+    glBindVertexArray(VAO_test);
+    glPointSize(10.0f);
+    if(test_point_count > 0) glDrawArrays(GL_POINTS, 0, test_point_count);
     glBindVertexArray(0);
     glUseProgram(0);
 }

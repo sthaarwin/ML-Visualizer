@@ -17,6 +17,11 @@ void initRenderer(const std::vector<Vertex>& pointVertices, const std::vector<Ve
 void drawPoints(size_t numPoints);
 void drawLines(size_t numVertices);
 void updateVertices(const std::vector<Vertex>& vertices);
+void setPointVertices(const std::vector<Vertex>& vertices); // reallocate point VBO for different dataset sizes
+// Test points (user-provided)
+void initTestPoints(int maxPoints);
+void updateTestPoints(const std::vector<Vertex>& testVertices);
+void drawTestPoints();
 
 // Decision boundary support (up to three pairwise lines -> 6 vertices total)
 void updateBoundaryLines(const std::vector<Vertex>& lineVertices); // expect 6 vertices (3 lines)

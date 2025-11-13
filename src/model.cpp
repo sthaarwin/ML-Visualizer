@@ -1,6 +1,7 @@
 #include "model.h"
 #include <random>
 #include <cmath>
+#include <fstream>
 
 static void softmax_inplace(float logits[3], float probs[3]){
     // subtract max for numerical stability
@@ -91,4 +92,26 @@ void LogisticModel::train_epoch(const std::vector<point2D>& data){
 
     epochs_trained += 1;
     last_loss = compute_loss(data);
+}
+
+bool LogisticModel::save(const char* filename) const{
+    std::ofstream out(filename, std::ios::binary);
+    if(!out) return false;
+    out.write((const char*)W, sizeof(W));
+    out.write((const char*)&lr, sizeof(lr));
+    out.write((const char*)&epochs_trained, sizeof(epochs_trained));
+    out.write((const char*)&last_loss, sizeof(last_loss));
+    out.close();
+    return true;
+}
+
+bool LogisticModel::load(const char* filename){
+    std::ifstream in(filename, std::ios::binary);
+    if(!in) return false;
+    in.read((char*)W, sizeof(W));
+    in.read((char*)&lr, sizeof(lr));
+    in.read((char*)&epochs_trained, sizeof(epochs_trained));
+    in.read((char*)&last_loss, sizeof(last_loss));
+    in.close();
+    return true;
 }
