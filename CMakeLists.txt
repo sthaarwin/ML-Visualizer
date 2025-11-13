@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Project source
 set(PROJECT_SOURCES
     ${PROJECT_SOURCE_DIR}/src/main.cpp
+    ${PROJECT_SOURCE_DIR}/src/renderer.cpp       
+    ${PROJECT_SOURCE_DIR}/src/dataset.cpp         
 )
 
 # Add ImGui implementation/source files from the included imgui folder
