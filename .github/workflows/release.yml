@@ -1,0 +1,90 @@
+name: Build Matrix and Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p build
+          cd build
+          cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd build
+          ninja
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd build
+          tar -czf ml-visualizer-${{ github.ref_name }}-linux.tar.gz *
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          cmake --build build --config Release
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $zip = "ml-visualizer-${{ github.ref_name }}-windows.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path build\**\* -DestinationPath $zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact
+          path: |
+            build/ml-visualizer-${{ github.ref_name }}-linux.tar.gz
+            ml-visualizer-${{ github.ref_name }}-windows.zip
+
+  release:
+    name: Create Release and Attach Artifacts
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -la artifacts || true
+
+      - name: Create GitHub Release and attach assets
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: artifacts/**
